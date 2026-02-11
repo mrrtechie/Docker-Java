@@ -1,0 +1,61 @@
+pipeline{
+    agent any
+    tools{
+          maven 'mymaven'
+    }
+        stages{
+            stage('cleanws'){
+                steps{
+                    cleanWs()
+                }
+            }
+            stage('Code'){
+                steps{
+                    git 'https://github.com/mrrtechie/docker-webapp.git'
+                }
+            }
+            stage('Build'){
+                steps{
+                    sh 'mvn clean package -DskipTests'
+                    sh 'cp -r target Docker-app'
+                }
+            }
+            stage('CQA'){
+                steps{
+                     withSonarQubeEnv('mysonar') {
+                              sh "mvn clean package sonar:sonar -DskipTests -Dsonar.projectKey=Java"
+                               }
+                }
+            }
+            stage('Artifact'){
+                steps{
+                   nexusArtifactUploader artifacts: [[artifactId: 'vprofile', classifier: '', file: 'target/vprofile-v2.war', type: 'war']], credentialsId: 'nexus', groupId: 'com.visualpathit', nexusUrl: '18.60.41.217:8081/', nexusVersion: 'nexus3', protocol: 'http', repository: 'java', version: 'v2'
+                }
+            }
+            stage('Image'){
+                steps{
+                    sh 'docker build -t appimage Docker-app'
+                    sh 'docker build -t dbimage Docker-db'
+                }
+            }
+            stage('ImageScan'){
+                steps{
+                    sh 'trivy image appimage >> appimage-report.txt'
+                    sh 'trivy image dbimage >> dbimage-report.txt'
+                }
+            }
+            stage('Deploy'){
+                    steps{
+                      dir('compose') {
+                            sh 'docker compose up -d'
+                            }
+                       }
+                    }
+
+        }
+        post{
+            always{
+                emailext body: '${currentBuild.currentResult}:*Job${env.JOB_NAME}\\n build ${env.BUILD_NUMBER}\\n More info at: ${env.BUILD_URL}', subject: 'Pipeline status', to: 'mrrexams@gmail.com'
+            }
+        }
+    }
